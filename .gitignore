@@ -1,0 +1,16 @@
+# PyCharm
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment variables
+.env
+
+# Tests
+.pytest_cache/
