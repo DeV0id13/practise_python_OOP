@@ -200,3 +200,147 @@ assert account.portfolio["stocks"] == Decimal("3000.00")
 
 print(account)
 print("InvestmentAccount: проверки пройдены!")
+
+from datetime import date
+import uuid
+
+from client import Client
+
+
+client = Client(
+    first_name="Ivan",
+    last_name="Petrov",
+    date_of_birth=date(2000, 5, 15),
+    email="ivan@example.com",
+    phone="+79991234567",
+    password="12345678923456"
+)
+
+assert len(client.account_ids) == 0
+assert client.status.value == "active"
+
+account_id = uuid.uuid4()
+
+client.add_account(account_id)
+assert account_id in client.account_ids
+
+info = client.get_client_info()
+assert info["account_ids"] == [str(account_id)]
+
+# Изменение возвращённого списка не влияет на клиента
+info["account_ids"].clear()
+assert account_id in client.account_ids
+
+client.remove_account(account_id)
+assert len(client.account_ids) == 0
+
+print(client)
+print("Client: основные проверки пройдены!")
+
+from datetime import date
+
+from client import Client
+
+client = Client(
+    first_name="Ivan",
+    last_name="Petrov",
+    date_of_birth=date(2000, 5, 15),
+    email="ivan@example.com",
+    phone="+79991234567",
+    password="MySecurePassword123",
+)
+
+assert client.verify_password("MySecurePassword123") is True
+assert client.verify_password("WrongPassword123") is False
+assert client._failed_login_attempts == 0
+
+print("Проверка пароля работает корректно!")
+
+
+from datetime import date
+
+from client import Client
+from enums import ClientStatus
+
+client = Client(
+    first_name="Ivan",
+    last_name="Petrov",
+    date_of_birth=date(2000, 5, 15),
+    email="ivan@example.com",
+    phone="+79991234567",
+    password="MySecurePassword123",
+)
+
+# Первая неправильная попытка
+assert client.authenticate("wrong1") is False
+assert client._failed_login_attempts == 1
+assert client.status == ClientStatus.ACTIVE
+
+# Вторая неправильная попытка
+assert client.authenticate("wrong2") is False
+assert client._failed_login_attempts == 2
+
+# Успешный вход сбрасывает счётчик
+assert client.authenticate("MySecurePassword123") is True
+assert client._failed_login_attempts == 0
+
+# Три неправильных пароля подряд
+for _ in range(3):
+    assert client.authenticate("wrong") is False
+
+# Клиент заблокирован
+assert client.status == ClientStatus.BLOCKED
+assert client._failed_login_attempts == 3
+
+# Даже правильный пароль больше не работает
+try:
+    client.authenticate("MySecurePassword123")
+except ValueError:
+    pass
+else:
+    raise AssertionError("Expected blocked client error")
+
+print("Все проверки авторизации пройдены!")
+
+
+from datetime import date
+
+from client import Client
+from enums import ClientStatus
+
+
+client = Client(
+    first_name="Ivan",
+    last_name="Petrov",
+    date_of_birth=date(2000, 5, 15),
+    email="ivan@example.com",
+    phone="+79991234567",
+    password="MySecurePassword123",
+)
+
+# Две неудачные попытки
+assert client.authenticate("wrong1") is False
+assert client.authenticate("wrong2") is False
+
+assert client.status == ClientStatus.ACTIVE
+
+# Успешный вход сбрасывает счётчик
+assert client.authenticate("MySecurePassword123") is True
+assert client._failed_login_attempts == 0
+
+# Три неудачные попытки подряд
+for _ in range(3):
+    assert client.authenticate("wrong") is False
+
+assert client.status == ClientStatus.BLOCKED
+assert client._failed_login_attempts == 3
+
+# Заблокированный клиент не может войти
+try:
+    client.authenticate("MySecurePassword123")
+except ValueError:
+    pass
+else:
+    raise AssertionError("Blocked client authenticated")
+
+print("Client authentication: tests passed!")

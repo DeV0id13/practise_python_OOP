@@ -138,5 +138,5 @@ class AbstractAccount(ABC):
         pass
 
     @abstractmethod
-    def get_account_info(self) -> dict[str, str | Decimal]:
+    def get_account_info(self) -> dict[str, object]:
         pass

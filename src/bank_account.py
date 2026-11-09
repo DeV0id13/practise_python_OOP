@@ -30,7 +30,7 @@ class BankAccount(AbstractAccount):
 
         self.currency = currency
 
-    def get_account_info(self) -> dict[str, object]:
+    def get_account_info(self) -> dict[str, str | Decimal]:
         return {
             "account_type": type(self).__name__,
             "account_id": str(self.account_id),

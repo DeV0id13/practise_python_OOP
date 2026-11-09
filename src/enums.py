@@ -13,3 +13,8 @@ class AccountCurrency(str, Enum):
     EUR = "EUR"
     KZT = "KZT"
     CNY = "CNY"
+
+
+class ClientStatus(str, Enum):
+    ACTIVE = "active"
+    BLOCKED = "blocked"
