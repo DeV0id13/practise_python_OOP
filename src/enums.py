@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, IntEnum
 
 
 class AccountStatus(str, Enum):
@@ -18,3 +18,24 @@ class AccountCurrency(str, Enum):
 class ClientStatus(str, Enum):
     ACTIVE = "active"
     BLOCKED = "blocked"
+
+
+class TransactionType(str, Enum):
+    DEPOSIT = "deposit"
+    WITHDRAWAL = "withdrawal"
+    INTERNAL_TRANSFER = "internal_transfer"
+    EXTERNAL_TRANSFER = "external_transfer"
+
+
+class TransactionStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class TransactionPriority(IntEnum):
+    LOW = 1
+    NORMAL = 2
+    HIGH = 3

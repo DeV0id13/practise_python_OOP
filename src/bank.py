@@ -1,6 +1,7 @@
 import uuid
-from decimal import Decimal
-
+from decimal import Decimal, InvalidOperation
+from premium_account import PremiumAccount
+from external_bank_gateway import ExternalBankGateway
 from client import Client
 from bank_account import BankAccount
 from exceptions import InvalidOperationError
@@ -82,7 +83,7 @@ class Bank:
                 "account_access",
                 "Попытка доступа к чужому или неизвестному счёту.",
             )
-            raise ValueError(
+            raise InvalidOperationError(
                 "Account does not exist for this client."
             )
         return account
@@ -366,3 +367,114 @@ class Bank:
             )
 
         return account.apply_monthly_interest()
+
+    def transfer(
+            self,
+            client_id: uuid.UUID,
+            sender_account_id: uuid.UUID,
+            recipient_account_id: uuid.UUID,
+            amount: Decimal,
+            currency: AccountCurrency,
+    ) -> None:
+        sender = self._get_client_account(
+            client_id, sender_account_id
+        )
+        self._check_working_hours(client_id, "transfer")
+        if not isinstance(recipient_account_id, uuid.UUID):
+            raise TypeError("Invalid recipient account ID.")
+        if sender_account_id == recipient_account_id:
+            raise InvalidOperationError(
+                "Cannot transfer to the same account."
+            )
+        recipient = self._accounts.get(recipient_account_id)
+        if recipient is None:
+            raise InvalidOperationError(
+                "Recipient account does not exist."
+            )
+        if not isinstance(currency, AccountCurrency):
+            raise TypeError("Invalid currency.")
+        sender.validate_status()
+        recipient.validate_status()
+        sender.validate_operation_amount(amount)
+        if sender.currency != currency or recipient.currency != currency:
+            raise InvalidOperationError(
+                "Account currencies must match."
+            )
+        if sender.balance < 0 and not isinstance(sender, PremiumAccount):
+            raise InvalidOperationError(
+                "Transfers from negative balances are prohibited."
+            )
+        sender_balance = sender.balance
+        recipient_balance = recipient.balance
+        try:
+            sender.withdraw(amount)
+            recipient.deposit(amount)
+        except Exception:
+            sender._balance = sender_balance
+            recipient._balance = recipient_balance
+            raise
+
+    def external_transfer(
+            self,
+            client_id: uuid.UUID,
+            sender_account_id: uuid.UUID,
+            recipient_account_id: uuid.UUID,
+            amount: Decimal,
+            fee: Decimal,
+            gateway: ExternalBankGateway,
+            recipient_amount: Decimal | None = None,
+    ) -> None:
+        sender = self._get_client_account(
+            client_id,
+            sender_account_id,
+        )
+        self._check_working_hours(
+            client_id,
+            "external_transfer",
+        )
+        if not isinstance(gateway, ExternalBankGateway):
+            raise TypeError(
+                "gateway must be an ExternalBankGateway."
+            )
+        recipient = gateway._get_account(
+            recipient_account_id
+        )
+        sender.validate_status()
+        if recipient_amount is None:
+            if sender.currency != recipient.currency:
+                raise InvalidOperationError(
+                    "Currency conversion is required."
+                )
+            recipient_amount = amount
+
+        sender.validate_operation_amount(recipient_amount)
+        sender.validate_operation_amount(amount)
+        if not isinstance(fee, Decimal):
+            raise TypeError("Fee must be a Decimal.")
+        if not fee.is_finite() or fee < 0:
+            raise ValueError(
+                "Fee must be a non-negative finite Decimal."
+            )
+        try:
+            if fee != fee.quantize(Decimal("0.01")):
+                raise ValueError(
+                    "Fee must have no more than 2 decimal places."
+                )
+        except InvalidOperation as exc:
+            raise ValueError(
+                "Invalid fee precision."
+            ) from exc
+        total = amount + fee
+        sender.validate_operation_amount(total)
+        sender_balance = sender.balance
+        recipient_balance = recipient.balance
+        try:
+            sender.withdraw(total)
+            gateway.deposit(
+                account_id=recipient_account_id,
+                amount=recipient_amount,
+            )
+        except Exception:
+            sender._balance = sender_balance
+            recipient._balance = recipient_balance
+            raise

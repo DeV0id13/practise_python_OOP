@@ -344,3 +344,292 @@ else:
     raise AssertionError("Blocked client authenticated")
 
 print("Client authentication: tests passed!")
+
+
+from datetime import date, datetime
+from decimal import Decimal
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
+
+from bank import Bank
+from bank_account import BankAccount
+from client import Client
+from transaction import Transaction
+from transaction_processor import TransactionProcessor
+from enums import (
+    AccountCurrency,
+    TransactionType,
+    TransactionStatus,
+)
+
+
+bank = Bank("Test Bank")
+
+client = Client(
+    first_name="Ivan",
+    last_name="Petrov",
+    date_of_birth=date(2000, 5, 15),
+    email="ivan@example.com",
+    phone="+79991234567",
+    password="MySecurePassword123",
+)
+
+bank.add_client(client)
+
+assert bank.authenticate_client(
+    client.client_id,
+    "MySecurePassword123",
+)
+
+account = BankAccount(
+    first_name="Ivan",
+    last_name="Petrov",
+    balance=Decimal("1000.00"),
+    currency=AccountCurrency.USD,
+)
+
+moscow = ZoneInfo("Europe/Moscow")
+
+# Подменяем время на 12:00, чтобы тест
+# не зависел от реального времени суток.
+with patch("bank.datetime") as mock_datetime:
+    mock_datetime.now.return_value = datetime(
+        2026, 11, 11, 12, 0, tzinfo=moscow
+    )
+
+    bank.open_account(client.client_id, account)
+
+    processor = TransactionProcessor(bank)
+
+    # Успешное пополнение
+    deposit_tx = Transaction(
+        transaction_type=TransactionType.DEPOSIT,
+        amount=Decimal("500.00"),
+        currency=AccountCurrency.USD,
+        client_id=client.client_id,
+        recipient_account_id=account.account_id,
+    )
+
+    processor.process(deposit_tx)
+
+    assert deposit_tx.status == TransactionStatus.COMPLETED
+    assert deposit_tx.attempts == 1
+    assert deposit_tx.fee == Decimal("0.00")
+    assert account.balance == Decimal("1500.00")
+
+    # Недостаточно средств
+    withdraw_tx = Transaction(
+        transaction_type=TransactionType.WITHDRAWAL,
+        amount=Decimal("2000.00"),
+        currency=AccountCurrency.USD,
+        client_id=client.client_id,
+        sender_account_id=account.account_id,
+    )
+
+    processor.process(withdraw_tx)
+
+    assert withdraw_tx.status == TransactionStatus.FAILED
+    assert withdraw_tx.attempts == 1
+    assert withdraw_tx.failure_reason is not None
+    assert account.balance == Decimal("1500.00")
+
+print("TransactionProcessor: tests passed!")
+
+
+
+# Создаём два счёта
+sender = BankAccount(
+    first_name="Ivan",
+    last_name="Petrov",
+    balance=Decimal("1000.00"),
+    currency=AccountCurrency.USD,
+)
+
+recipient = BankAccount(
+    first_name="Ivan",
+    last_name="Petrov",
+    balance=Decimal("500.00"),
+    currency=AccountCurrency.USD,
+)
+
+# Подменяем время для всех банковских операций
+with patch("bank.datetime") as mock_datetime:
+    mock_datetime.now.return_value = datetime(
+        2026, 11, 11, 12, 0, tzinfo=moscow
+    )
+
+    # Регистрируем счета в банке
+    bank.open_account(client.client_id, sender)
+    bank.open_account(client.client_id, recipient)
+
+    # Тест 1: успешный перевод
+    transfer_tx = Transaction(
+        transaction_type=TransactionType.INTERNAL_TRANSFER,
+        amount=Decimal("300.00"),
+        currency=AccountCurrency.USD,
+        client_id=client.client_id,
+        sender_account_id=sender.account_id,
+        recipient_account_id=recipient.account_id,
+    )
+
+    processor.process(transfer_tx)
+
+    assert transfer_tx.status == TransactionStatus.COMPLETED
+    assert transfer_tx.attempts == 1
+    assert sender.balance == Decimal("700.00")
+    assert recipient.balance == Decimal("800.00")
+
+    print("Successful transfer: passed!")
+
+    # Тест 2: откат при ошибке
+    sender_balance_before = sender.balance
+    recipient_balance_before = recipient.balance
+
+    failed_tx = Transaction(
+        transaction_type=TransactionType.INTERNAL_TRANSFER,
+        amount=Decimal("100.00"),
+        currency=AccountCurrency.USD,
+        client_id=client.client_id,
+        sender_account_id=sender.account_id,
+        recipient_account_id=recipient.account_id,
+    )
+
+    with patch.object(
+        recipient,
+        "deposit",
+        side_effect=InvalidOperationError("Deposit failed"),
+    ):
+        processor.process(failed_tx)
+
+    assert failed_tx.status == TransactionStatus.FAILED
+    assert failed_tx.failure_reason == "Deposit failed"
+
+    assert sender.balance == sender_balance_before
+    assert recipient.balance == recipient_balance_before
+
+    print("Transfer rollback: passed!")
+
+external_tx = Transaction(
+    transaction_type=TransactionType.EXTERNAL_TRANSFER,
+    amount=Decimal("125.50"),
+    currency=AccountCurrency.USD,
+    client_id=client.client_id,
+    sender_account_id=sender.account_id,
+    recipient_account_id=recipient.account_id,
+)
+
+assert processor._calculate_fee(
+    external_tx
+) == Decimal("1.26")
+
+assert processor._calculate_fee(
+    transfer_tx
+) == Decimal("0.00")
+
+print("Transaction fees: tests passed!")
+
+from external_account import ExternalAccount
+from external_bank_gateway import ExternalBankGateway
+from transaction_queue import TransactionQueue
+
+gateway = ExternalBankGateway()
+
+external_recipient = ExternalAccount(
+    currency=AccountCurrency.EUR,
+    balance=Decimal("500.00"),
+)
+gateway.register_account(external_recipient)
+
+processor = TransactionProcessor(bank, gateway)
+queue = TransactionQueue()
+
+# 5 пополнений
+for _ in range(5):
+    queue.add_transaction(Transaction(
+        transaction_type=TransactionType.DEPOSIT,
+        amount=Decimal("1.00"),
+        currency=AccountCurrency.USD,
+        client_id=client.client_id,
+        recipient_account_id=account.account_id,
+    ))
+
+# 2 снятия
+for _ in range(2):
+    queue.add_transaction(Transaction(
+        transaction_type=TransactionType.WITHDRAWAL,
+        amount=Decimal("2.00"),
+        currency=AccountCurrency.USD,
+        client_id=client.client_id,
+        sender_account_id=account.account_id,
+    ))
+
+# 2 внутренних перевода
+for _ in range(2):
+    queue.add_transaction(Transaction(
+        transaction_type=TransactionType.INTERNAL_TRANSFER,
+        amount=Decimal("10.00"),
+        currency=AccountCurrency.USD,
+        client_id=client.client_id,
+        sender_account_id=sender.account_id,
+        recipient_account_id=recipient.account_id,
+    ))
+
+# 1 внешний перевод с USD в EUR
+external_transfer_tx = Transaction(
+    transaction_type=TransactionType.EXTERNAL_TRANSFER,
+    amount=Decimal("100.00"),
+    currency=AccountCurrency.USD,
+    client_id=client.client_id,
+    sender_account_id=sender.account_id,
+    recipient_account_id=external_recipient.account_id,
+)
+queue.add_transaction(external_transfer_tx)
+
+# Выполняем операции в разрешённое время
+with patch("bank.datetime") as mock_datetime:
+    mock_datetime.now.return_value = datetime(
+        2026, 11, 11, 12, 0, tzinfo=moscow
+    )
+    processor.process_queue(queue)
+
+assert len(queue) == 10
+assert queue.get_next_transaction() is None
+
+assert all(
+    tx.status == TransactionStatus.COMPLETED
+    for tx in queue._transactions
+)
+
+assert account.balance == Decimal("1501.00")
+assert sender.balance == Decimal("579.00")
+assert recipient.balance == Decimal("820.00")
+assert external_recipient.balance == Decimal("592.00")
+assert external_transfer_tx.fee == Decimal("1.00")
+
+print("Day 4: 10 transactions passed!")
+
+failed_tx = Transaction(
+    transaction_type=TransactionType.WITHDRAWAL,
+    amount=Decimal("99999.00"),
+    currency=AccountCurrency.USD,
+    client_id=client.client_id,
+    sender_account_id=sender.account_id,
+)
+
+with patch("bank.datetime") as mock_datetime:
+    mock_datetime.now.return_value = datetime(
+        2026, 11, 11, 12, 0, tzinfo=moscow
+    )
+
+    processor.process(failed_tx)
+    assert failed_tx.status == TransactionStatus.FAILED
+    assert len(processor.error_log) == 1
+
+    processor.retry(failed_tx)
+    assert failed_tx.status == TransactionStatus.PENDING
+
+    processor.process(failed_tx)
+    assert failed_tx.attempts == 2
+    assert failed_tx.status == TransactionStatus.FAILED
+
+print("Day 4: retry and error logging passed!")
