@@ -42,7 +42,9 @@ class Bank:
             raise TypeError("Incorrect client_id")
         client = self._clients.get(client_id)
         if client is None:
-            raise ValueError("Client with this UUID does not exist.")
+            raise InvalidOperationError(
+                "Client with this UUID does not exist."
+            )
         return client
 
     def open_account(

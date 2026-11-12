@@ -46,12 +46,33 @@ class TransactionProcessor:
         if not isinstance(transaction, Transaction):
             raise TypeError("Expected Transaction instance.")
         if transaction.transaction_type == TransactionType.DEPOSIT:
+            account = self._bank._get_client_account(
+                client_id=transaction.client_id,
+                account_id=transaction.recipient_account_id,
+            )
+
+            if account.currency != transaction.currency:
+                raise InvalidOperationError(
+                    "Transaction currency does not match account currency."
+                )
+
             self._bank.deposit(
                 client_id=transaction.client_id,
                 account_id=transaction.recipient_account_id,
                 amount=transaction.amount,
             )
+
         elif transaction.transaction_type == TransactionType.WITHDRAWAL:
+            account = self._bank._get_client_account(
+                client_id=transaction.client_id,
+                account_id=transaction.sender_account_id,
+            )
+
+            if account.currency != transaction.currency:
+                raise InvalidOperationError(
+                    "Transaction currency does not match account currency."
+                )
+
             self._bank.withdraw(
                 client_id=transaction.client_id,
                 account_id=transaction.sender_account_id,

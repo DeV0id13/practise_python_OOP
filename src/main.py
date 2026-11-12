@@ -633,3 +633,61 @@ with patch("bank.datetime") as mock_datetime:
     assert failed_tx.status == TransactionStatus.FAILED
 
 print("Day 4: retry and error logging passed!")
+
+
+# Проверки замечаний
+
+from uuid import uuid4
+
+test_processor = TransactionProcessor(bank)
+
+# 1. Пополнение USD-счёта в EUR
+wrong_currency_deposit = Transaction(
+    transaction_type=TransactionType.DEPOSIT,
+    amount=Decimal("100.00"),
+    currency=AccountCurrency.EUR,
+    client_id=client.client_id,
+    recipient_account_id=account.account_id,
+)
+
+balance_before = account.balance
+test_processor.process(wrong_currency_deposit)
+
+assert wrong_currency_deposit.status == TransactionStatus.FAILED
+assert account.balance == balance_before
+assert wrong_currency_deposit.failure_reason is not None
+
+# 2. Снятие EUR с USD-счёта
+wrong_currency_withdraw = Transaction(
+    transaction_type=TransactionType.WITHDRAWAL,
+    amount=Decimal("100.00"),
+    currency=AccountCurrency.EUR,
+    client_id=client.client_id,
+    sender_account_id=account.account_id,
+)
+
+test_processor.process(wrong_currency_withdraw)
+
+assert wrong_currency_withdraw.status == TransactionStatus.FAILED
+assert account.balance == balance_before
+
+# 3. Неизвестный клиент
+unknown_client_tx = Transaction(
+    transaction_type=TransactionType.DEPOSIT,
+    amount=Decimal("100.00"),
+    currency=AccountCurrency.USD,
+    client_id=uuid4(),
+    recipient_account_id=account.account_id,
+)
+
+test_processor.process(unknown_client_tx)
+
+assert unknown_client_tx.status == TransactionStatus.FAILED
+assert unknown_client_tx.failure_reason is not None
+assert unknown_client_tx.attempts == 1
+assert account.balance == balance_before
+
+# Все три ошибки записаны
+assert len(test_processor.error_log) == 3
+
+print("reviews: all tests passed!")
